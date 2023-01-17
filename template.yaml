@@ -1,0 +1,148 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  twilioIVR
+
+  Sample SAM Template for twilioIVR
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 30
+    Tracing: Active
+  Api:
+    TracingEnabled: True
+
+Resources:
+  FnIVRUpdate:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      CodeUri: ivrupdate/
+      Handler: ivrup.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: payment
+          LOG_LEVEL: INFO
+          DYNAMO_TABLE: !Ref DynamoDBTable
+      Layers:
+        # Find the latest Layer version in the official documentation
+        # https://awslabs.github.io/aws-lambda-powertools-python/latest/#lambda-layer
+        - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:21
+      Events:
+        HelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /ivrUpdate
+            Method: post
+            RestApiId:
+              Ref: ApiGatewayApi
+      Policies:
+      # Give the Lambda service access to poll your DynamoDB Stream
+      - AmazonDynamoDBFullAccess            
+
+  FnIVRCallResponse:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31md#awsserverlessfunction
+    # DependsOn: ApiGatewayApi
+    Properties:
+      CodeUri: ivrcall/
+      Handler: ivrcall.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: payment
+          LOG_LEVEL: INFO
+          DYNAMO_TABLE: !Ref DynamoDBTable
+          URL: !Join
+                  - ""
+                  - - !ImportValue IVRURL
+                    - /ivrForward/
+          # !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod/ivrCall"
+
+      Layers:
+        # Find the latest Layer version in the official documentation
+        # https://awslabs.github.io/aws-lambda-powertools-python/latest/#lambda-layer
+        - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:21
+      Events:
+        HelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /ivrCall
+            Method: post
+            RestApiId:
+              Ref: ApiGatewayApi
+      Policies:
+      # Give the Lambda service access to poll your DynamoDB Stream
+      - AmazonDynamoDBFullAccess            
+
+  FnIVRForward:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31md#awsserverlessfunction
+    # DependsOn: ApiGatewayApi
+    Properties:
+      CodeUri: ivrforward/
+      Handler: ivrfwd.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          POWERTOOLS_SERVICE_NAME: payment
+          LOG_LEVEL: INFO
+          DYNAMO_TABLE: !Ref DynamoDBTable
+          URL: !Join
+                  - ""
+                  - - !ImportValue IVRURL
+                    - /ivrCall
+          # !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod/ivrCall"
+
+      Layers:
+        # Find the latest Layer version in the official documentation
+        # https://awslabs.github.io/aws-lambda-powertools-python/latest/#lambda-layer
+        - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:21
+      Events:
+        HelloWorld:
+          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Properties:
+            Path: /ivrForward
+            Method: post
+            RestApiId:
+              Ref: ApiGatewayApi
+      Policies:
+      # Give the Lambda service access to poll your DynamoDB Stream
+      - AmazonDynamoDBFullAccess            
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      AttributeDefinitions: 
+        - AttributeName: id
+          AttributeType: S
+      KeySchema: 
+        - AttributeName: id
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod      
+
+
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  HelloWorldApi:
+    Description: "API Gateway endpoint URL for Prod stage for Hello World function"
+    Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod/"
+    Export: 
+      Name: IVRURL
+    # Value: !Join 
+    #   - ""
+    #   - - "https://"
+    #     - !GetAtt ApiGatewayApi.RootResourceId
+    #     - ".execute-api."
+    #     - !Sub ${AWS::Region}.amazonaws.com/Prod/
