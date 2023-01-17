@@ -3,37 +3,44 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   twilioIVR
 
-  Sample SAM Template for twilioIVR
+  SAM Template for TwilioIVR
 
 # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
 Globals:
   Function:
     Timeout: 30
+    # Default timeout for all Lambda functions set to 30s
     Tracing: Active
   Api:
     TracingEnabled: True
 
 Resources:
   FnIVRUpdate:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    # This function receives a call from Google Sheets and stores it in DynamoDB
+    # ** Future version idea: Remove Lambda and have the API Gateway store by direct DynamoDB integration
+    Type: AWS::Serverless::Function 
     Properties:
       CodeUri: ivrupdate/
       Handler: ivrup.lambda_handler
       Runtime: python3.9
       Architectures:
         - x86_64
+        # ** Future version:  Test and deploy ARM architecture to for cost optimization.
+        # Unlikely this app will rise to $0.01/mo for some time even on x86_64, so not a priority
       Environment:
         Variables:
           POWERTOOLS_SERVICE_NAME: payment
           LOG_LEVEL: INFO
-          DYNAMO_TABLE: !Ref DynamoDBTable
+          DYNAMO_TABLE: !Ref DynamoDBTable  # Get the created DynamoDB table at deploy-time
       Layers:
+        # Lambda Powertools layer.
         # Find the latest Layer version in the official documentation
         # https://awslabs.github.io/aws-lambda-powertools-python/latest/#lambda-layer
         - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:21
       Events:
         HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          # REST API Gateway
+          Type: Api
           Properties:
             Path: /ivrUpdate
             Method: post
@@ -41,11 +48,11 @@ Resources:
               Ref: ApiGatewayApi
       Policies:
       # Give the Lambda service access to poll your DynamoDB Stream
+      # Should reduce access to just the table involved for "least privilege" principle
       - AmazonDynamoDBFullAccess            
 
   FnIVRCallResponse:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31md#awsserverlessfunction
-    # DependsOn: ApiGatewayApi
+    Type: AWS::Serverless::Function 
     Properties:
       CodeUri: ivrcall/
       Handler: ivrcall.lambda_handler
@@ -61,15 +68,13 @@ Resources:
                   - ""
                   - - !ImportValue IVRURL
                     - /ivrForward/
-          # !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod/ivrCall"
+          
 
       Layers:
-        # Find the latest Layer version in the official documentation
-        # https://awslabs.github.io/aws-lambda-powertools-python/latest/#lambda-layer
         - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:21
       Events:
         HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Type: Api
           Properties:
             Path: /ivrCall
             Method: post
@@ -77,11 +82,11 @@ Resources:
               Ref: ApiGatewayApi
       Policies:
       # Give the Lambda service access to poll your DynamoDB Stream
+      # Should be read access
       - AmazonDynamoDBFullAccess            
 
   FnIVRForward:
-    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31md#awsserverlessfunction
-    # DependsOn: ApiGatewayApi
+    Type: AWS::Serverless::Function
     Properties:
       CodeUri: ivrforward/
       Handler: ivrfwd.lambda_handler
@@ -97,15 +102,12 @@ Resources:
                   - ""
                   - - !ImportValue IVRURL
                     - /ivrCall
-          # !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod/ivrCall"
 
       Layers:
-        # Find the latest Layer version in the official documentation
-        # https://awslabs.github.io/aws-lambda-powertools-python/latest/#lambda-layer
         - !Sub arn:aws:lambda:${AWS::Region}:017000801446:layer:AWSLambdaPowertoolsPython:21
       Events:
         HelloWorld:
-          Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+          Type: Api
           Properties:
             Path: /ivrForward
             Method: post
@@ -113,9 +115,11 @@ Resources:
               Ref: ApiGatewayApi
       Policies:
       # Give the Lambda service access to poll your DynamoDB Stream
+      # Should be read only
       - AmazonDynamoDBFullAccess            
 
   DynamoDBTable:
+    # Create a simple DynamoDB table. It only has 1 row and two columns
     Type: AWS::DynamoDB::Table
     Properties: 
       AttributeDefinitions: 
@@ -125,24 +129,22 @@ Resources:
         - AttributeName: id
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
+
   ApiGatewayApi:
+    # Create 1 APIGW to be shared by all Lambda functions using different paths/verbs
     Type: AWS::Serverless::Api
     Properties:
       StageName: prod      
 
 
 Outputs:
-  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
-  # Find out more about other implicit resources you can reference within SAM
-  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  # Need the API endpoint URL to pass into Lambdas
+  # Caused a circular reference error when I tried to do it normally, so doing it as a CF Export and then !ImportValue works
+  # This approach will likely cause an error on first deployment on a new account. If so, comment all by the ApiGatewayApi resource and deploy
+  # Then deploy a second time with the rest of the resources un-commented
   HelloWorldApi:
     Description: "API Gateway endpoint URL for Prod stage for Hello World function"
     Value: !Sub "https://${ApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/prod/"
     Export: 
       Name: IVRURL
-    # Value: !Join 
-    #   - ""
-    #   - - "https://"
-    #     - !GetAtt ApiGatewayApi.RootResourceId
-    #     - ".execute-api."
-    #     - !Sub ${AWS::Region}.amazonaws.com/Prod/
+
