@@ -15,7 +15,12 @@ def lambda_handler(event, context):
     # Extract the JSON from the body of the call
     body = json.dumps(event['body'])
     b2 = json.loads(json.loads(body))
-    numbers = json.loads(b2['data'])
+    print(b2)
+    if b2['active']:
+        numbers = json.loads(b2['data'])
+    else:
+        numbers=[]
+        b2['message'] = ''
     for d in numbers:
         if d[0] == "Number":
             pass
